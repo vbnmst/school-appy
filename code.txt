@@ -1,0 +1,1615 @@
+﻿package com.example
+
+import android.os.Bundle
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
+import androidx.activity.viewModels
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.outlined.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.lifecycleScope
+import androidx.navigation.NavGraph.Companion.findStartDestination
+import androidx.navigation.NavType
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
+import androidx.navigation.compose.rememberNavController
+import androidx.navigation.navArgument
+import com.example.data.local.AppDatabase
+import com.example.data.model.SchoolStage
+import com.example.data.repository.SecurityRepository
+import com.example.ui.navigation.Screen
+import com.example.ui.screens.*
+import com.example.ui.theme.EduBlue
+import com.example.ui.theme.MyApplicationTheme
+import com.example.ui.viewmodel.AuthState
+import com.example.ui.viewmodel.AuthViewModel
+import com.example.ui.viewmodel.SecurityViewModel
+import com.example.ui.viewmodel.SecurityViewModelFactory
+
+class MainActivity : ComponentActivity() {
+
+    private val authViewModel: AuthViewModel by viewModels()
+
+    private val securityViewModel: SecurityViewModel by viewModels {
+        val database = AppDatabase.getDatabase(applicationContext, lifecycleScope)
+        val adminPreferences = com.example.data.preferences.AdminPreferences(applicationContext)
+        val repository = SecurityRepository(database, adminPreferences)
+        SecurityViewModelFactory(repository)
+    }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
+
+        // Initialize WorkManager Periodic Auto-Backup
+        if (com.example.util.BackupScheduler.isAutoBackupEnabled(this)) {
+            com.example.util.BackupScheduler.schedulePeriodicBackup(this)
+        }
+
+        setContent {
+            MyApplicationTheme {
+                MainAppContent(
+                    authViewModel = authViewModel,
+                    securityViewModel = securityViewModel
+                )
+            }
+        }
+    }
+}
+
+data class BottomNavItem(
+    val route: String,
+    val title: String,
+    val selectedIcon: androidx.compose.ui.graphics.vector.ImageVector,
+    val unselectedIcon: androidx.compose.ui.graphics.vector.ImageVector,
+    val testTag: String
+)
+
+@Composable
+fun MainAppContent(
+    authViewModel: AuthViewModel,
+    securityViewModel: SecurityViewModel
+) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val navController = rememberNavController()
+    val authState by authViewModel.authState.collectAsStateWithLifecycle()
+
+    LaunchedEffect(Unit) {
+        securityViewModel.refreshBackupStatus(context)
+    }
+
+    val schools by securityViewModel.filteredSchools.collectAsStateWithLifecycle()
+    val allSchools by securityViewModel.allSchools.collectAsStateWithLifecycle()
+    val teachers by securityViewModel.filteredTeachers.collectAsStateWithLifecycle()
+    val allTeachers by securityViewModel.allTeachers.collectAsStateWithLifecycle()
+    val incidents by securityViewModel.filteredIncidents.collectAsStateWithLifecycle()
+    val allIncidents by securityViewModel.allIncidents.collectAsStateWithLifecycle()
+    val allLogs by securityViewModel.allLogs.collectAsStateWithLifecycle()
+
+    val allLeaves by securityViewModel.allLeaves.collectAsStateWithLifecycle()
+    val allPenalties by securityViewModel.allPenalties.collectAsStateWithLifecycle()
+    val allTrips by securityViewModel.allTrips.collectAsStateWithLifecycle()
+    val isBackingUp by securityViewModel.isBackingUp.collectAsStateWithLifecycle()
+    val backupResult by securityViewModel.backupResult.collectAsStateWithLifecycle()
+    val restoreResult by securityViewModel.restoreResult.collectAsStateWithLifecycle()
+    val lastBackupDate by securityViewModel.lastBackupDate.collectAsStateWithLifecycle()
+    val isAutoBackupEnabled by securityViewModel.isAutoBackupEnabled.collectAsStateWithLifecycle()
+
+    val schoolSearchQuery by securityViewModel.schoolSearchQuery.collectAsStateWithLifecycle()
+    val selectedStageFilter by securityViewModel.selectedStageFilter.collectAsStateWithLifecycle()
+    val teacherSearchQuery by securityViewModel.teacherSearchQuery.collectAsStateWithLifecycle()
+    val incidentSearchQuery by securityViewModel.incidentSearchQuery.collectAsStateWithLifecycle()
+    val incidentStatusFilter by securityViewModel.incidentStatusFilter.collectAsStateWithLifecycle()
+    val importMessage by securityViewModel.importMessage.collectAsStateWithLifecycle()
+    val isImporting by securityViewModel.isImporting.collectAsStateWithLifecycle()
+    val importSummary by securityViewModel.importSummary.collectAsStateWithLifecycle()
+    val adminConfig by securityViewModel.adminConfig.collectAsStateWithLifecycle()
+
+    val navBackStackEntry by navController.currentBackStackEntryAsState()
+    val currentRoute = navBackStackEntry?.destination?.route
+
+    val bottomNavItems = listOf(
+        BottomNavItem(
+            route = Screen.Dashboard.route,
+            title = "الرئيسية",
+            selectedIcon = Icons.Filled.Home,
+            unselectedIcon = Icons.Outlined.Home,
+            testTag = "nav_home"
+        ),
+        BottomNavItem(
+            route = Screen.Incidents.route,
+            title = "الأحداث",
+            selectedIcon = Icons.Filled.Warning,
+            unselectedIcon = Icons.Outlined.WarningAmber,
+            testTag = "nav_incidents"
+        ),
+        BottomNavItem(
+            route = Screen.Reports.route,
+            title = "التقارير",
+            selectedIcon = Icons.Filled.Assessment,
+            unselectedIcon = Icons.Outlined.Assessment,
+            testTag = "nav_reports"
+        ),
+        BottomNavItem(
+            route = Screen.Settings.route,
+            title = "الإعدادات",
+            selectedIcon = Icons.Filled.Settings,
+            unselectedIcon = Icons.Outlined.Settings,
+            testTag = "nav_settings"
+        )
+    )
+
+    val showBottomBar = currentRoute in listOf(
+        Screen.Dashboard.route,
+        Screen.Incidents.route,
+        Screen.Reports.route,
+        Screen.Settings.route
+    )
+
+    Scaffold(
+        modifier = Modifier.fillMaxSize(),
+        bottomBar = {
+            if (showBottomBar && authState.isAuthenticated) {
+                NavigationBar(
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    tonalElevation = 8.dp
+                ) {
+                    bottomNavItems.forEach { item ->
+                        val isSelected = currentRoute == item.route
+                        NavigationBarItem(
+                            selected = isSelected,
+                            onClick = {
+                                if (currentRoute != item.route) {
+                                    navController.navigate(item.route) {
+                                        popUpTo(navController.graph.findStartDestination().id) {
+                                            saveState = true
+                                        }
+                                        launchSingleTop = true
+                                        restoreState = true
+                                    }
+                                }
+                            },
+                            icon = {
+                                Icon(
+                                    imageVector = if (isSelected) item.selectedIcon else item.unselectedIcon,
+                                    contentDescription = item.title
+                                )
+                            },
+                            label = {
+                                Text(
+                                    text = item.title,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                                )
+                            },
+                            colors = NavigationBarItemDefaults.colors(
+                                selectedIconColor = EduBlue,
+                                selectedTextColor = EduBlue,
+                                indicatorColor = EduBlue.copy(alpha = 0.15f)
+                            ),
+                            modifier = Modifier.testTag(item.testTag)
+                        )
+                    }
+                }
+            }
+        }
+    ) { innerPadding ->
+        NavHost(
+            navController = navController,
+            startDestination = Screen.Splash.route,
+            modifier = Modifier.padding(innerPadding)
+        ) {
+            // Splash
+            composable(Screen.Splash.route) {
+                SplashScreen(
+                    isAuthenticated = authState.isAuthenticated,
+                    onNavigateNext = { isAuth ->
+                        val target = when {
+                            !adminConfig.isSetupCompleted -> Screen.FirstTimeSetup.route
+                            isAuth -> Screen.Dashboard.route
+                            else -> Screen.Login.route
+                        }
+                        navController.navigate(target) {
+                            popUpTo(Screen.Splash.route) { inclusive = true }
+                        }
+                    }
+                )
+            }
+
+            // First-Time Setup
+            composable(Screen.FirstTimeSetup.route) {
+                FirstTimeSetupScreen(
+                    initialDirectorate = adminConfig.directorateName,
+                    initialAdministration = adminConfig.administrationName,
+                    initialDirectorGeneral = adminConfig.directorGeneralName,
+                    initialSecurityOfficer = adminConfig.securityOfficerName,
+                    onSaveAndContinue = { dir, adm, dg, sec ->
+                        securityViewModel.saveAdminConfig(dir, adm, dg, sec)
+                        val target = if (authState.isAuthenticated) Screen.Dashboard.route else Screen.Login.route
+                        navController.navigate(target) {
+                            popUpTo(Screen.FirstTimeSetup.route) { inclusive = true }
+                        }
+                    }
+                )
+            }
+
+            // Login
+            composable(Screen.Login.route) {
+                LoginScreen(
+                    authState = authState,
+                    onLoginClick = { u, p ->
+                        authViewModel.login(u, p)
+                    },
+                    onQuickAdminClick = {
+                        authViewModel.quickAdminLogin()
+                    }
+                )
+
+                // If authenticated, navigate to dashboard
+                LaunchedEffect(authState.isAuthenticated) {
+                    if (authState.isAuthenticated) {
+                        navController.navigate(Screen.Dashboard.route) {
+                            popUpTo(Screen.Login.route) { inclusive = true }
+                        }
+                    }
+                }
+            }
+
+            // Dashboard
+            composable(Screen.Dashboard.route) {
+                DashboardScreen(
+                    schools = allSchools,
+                    teachers = allTeachers,
+                    incidents = allIncidents,
+                    adminName = authState.adminName,
+                    onAddSchool = { securityViewModel.addSchool(it) },
+                    onUpdateSchool = { securityViewModel.updateSchool(it) },
+                    onDeleteSchool = { securityViewModel.deleteSchool(it) },
+                    onSchoolClick = { schoolId ->
+                        navController.navigate(Screen.SchoolDetail.createRoute(schoolId))
+                    },
+                    onNavigateToTeachers = {
+                        securityViewModel.setStageFilter(null)
+                        navController.navigate(Screen.Teachers.route)
+                    },
+                    onNavigateToIncidents = {
+                        navController.navigate(Screen.Incidents.route)
+                    },
+                    onNavigateToReports = {
+                        navController.navigate(Screen.Reports.route)
+                    },
+                    onNavigateToExcelImport = {
+                        navController.navigate(Screen.ExcelImport.route)
+                    },
+                    onNavigateToAddIncident = {
+                        navController.navigate(Screen.AddEditIncident.createRoute())
+                    },
+                    onNavigateToSettings = {
+                        navController.navigate(Screen.Settings.route)
+                    },
+                    leaves = allLeaves,
+                    penalties = allPenalties,
+                    trips = allTrips
+                )
+            }
+
+            // Schools Screen
+            composable(
+                route = Screen.Schools.route,
+                arguments = listOf(
+                    navArgument("stage") {
+                        type = NavType.StringType
+                        nullable = true
+                        defaultValue = null
+                    }
+                )
+            ) { backStackEntry ->
+                val stageParam = backStackEntry.arguments?.getString("stage")
+                LaunchedEffect(stageParam) {
+                    if (stageParam != null) {
+                        try {
+                            securityViewModel.setStageFilter(SchoolStage.valueOf(stageParam))
+                        } catch (e: Exception) {
+                            securityViewModel.setStageFilter(null)
+                        }
+                    }
+                }
+
+                SchoolsScreen(
+                    schools = schools,
+                    searchQuery = schoolSearchQuery,
+                    selectedStage = selectedStageFilter,
+                    onSearchChange = { securityViewModel.setSchoolSearch(it) },
+                    onStageSelect = { securityViewModel.setStageFilter(it) },
+                    onAddSchool = { securityViewModel.addSchool(it) },
+                    onUpdateSchool = { securityViewModel.updateSchool(it) },
+                    onDeleteSchool = { securityViewModel.deleteSchool(it) },
+                    onSchoolClick = { schoolId ->
+                        navController.navigate(Screen.SchoolDetail.createRoute(schoolId))
+                    },
+                    onBackClick = { navController.popBackStack() }
+                )
+            }
+
+            // School Detail Screen
+            composable(
+                route = Screen.SchoolDetail.route,
+                arguments = listOf(
+                    navArgument("schoolId") { type = NavType.LongType }
+                )
+            ) { backStackEntry ->
+                val schoolId = backStackEntry.arguments?.getLong("schoolId") ?: 0L
+                val currentSchool = allSchools.find { it.id == schoolId }
+
+                SchoolDetailScreen(
+                    school = currentSchool,
+                    teachers = allTeachers,
+                    incidents = allIncidents,
+                    dailyLogs = allLogs,
+                    trips = allTrips,
+                    adminConfig = adminConfig,
+                    onAddTrip = { securityViewModel.addTrip(it) },
+                    onDeleteTrip = { securityViewModel.deleteTrip(it) },
+                    onUpdateSchool = { securityViewModel.updateSchool(it) },
+                    onAddIncidentClick = { schoolName ->
+                        navController.navigate(Screen.AddEditIncident.createRoute(schoolName = schoolName))
+                    },
+                    onTeacherClick = { teacherId ->
+                        navController.navigate(Screen.TeacherDetail.createRoute(teacherId))
+                    },
+                    onIncidentClick = { incidentId ->
+                        navController.navigate(Screen.IncidentDetail.createRoute(incidentId))
+                    },
+                    onAddDailyLog = { log ->
+                        securityViewModel.addDailyLog(log)
+                    },
+                    onBackClick = { navController.popBackStack() }
+                )
+            }
+
+            // Teachers Screen
+            composable(Screen.Teachers.route) {
+                TeachersScreen(
+                    teachers = teachers,
+                    schoolsList = allSchools,
+                    searchQuery = teacherSearchQuery,
+                    selectedStage = selectedStageFilter,
+                    onSearchChange = { securityViewModel.setTeacherSearch(it) },
+                    onStageSelect = { securityViewModel.setStageFilter(it) },
+                    onTeacherClick = { teacherId ->
+                        navController.navigate(Screen.TeacherDetail.createRoute(teacherId))
+                    },
+                    onAddTeacher = { securityViewModel.addTeacher(it) },
+                    onUpdateTeacher = { securityViewModel.updateTeacher(it) },
+                    onDeleteTeacher = { securityViewModel.deleteTeacher(it) },
+                    onBackClick = { navController.popBackStack() }
+                )
+            }
+
+            // Teacher Detail Screen
+            composable(
+                route = Screen.TeacherDetail.route,
+                arguments = listOf(
+                    navArgument("teacherId") { type = NavType.LongType }
+                )
+            ) { backStackEntry ->
+                val teacherId = backStackEntry.arguments?.getLong("teacherId") ?: 0L
+                val currentTeacher = allTeachers.find { it.id == teacherId }
+
+                TeacherDetailScreen(
+                    teacher = currentTeacher,
+                    incidents = allIncidents,
+                    dailyLogs = allLogs,
+                    leaves = allLeaves,
+                    penalties = allPenalties,
+                    onAddLeave = { securityViewModel.addLeave(it) },
+                    onDeleteLeave = { securityViewModel.deleteLeave(it) },
+                    onAddPenalty = { securityViewModel.addPenalty(it) },
+                    onDeletePenalty = { securityViewModel.deletePenalty(it) },
+                    onUpdateTeacher = { securityViewModel.updateTeacher(it) },
+                    onSchoolClick = { schoolName ->
+                        val s = allSchools.find { it.name == schoolName }
+                        if (s != null) {
+                            navController.navigate(Screen.SchoolDetail.createRoute(s.id))
+                        }
+                    },
+                    onIncidentClick = { incidentId ->
+                        navController.navigate(Screen.IncidentDetail.createRoute(incidentId))
+                    },
+                    onAddDailyLog = { log ->
+                        securityViewModel.addDailyLog(log)
+                    },
+                    onBackClick = { navController.popBackStack() }
+                )
+            }
+
+            // Incidents Screen
+            composable(Screen.Incidents.route) {
+                IncidentsScreen(
+                    incidents = incidents,
+                    searchQuery = incidentSearchQuery,
+                    selectedStatus = incidentStatusFilter,
+                    onSearchChange = { securityViewModel.setIncidentSearch(it) },
+                    onStatusFilter = { securityViewModel.setIncidentStatusFilter(it) },
+                    onIncidentClick = { incidentId ->
+                        navController.navigate(Screen.IncidentDetail.createRoute(incidentId))
+                    },
+                    onEditIncident = { incidentId ->
+                        navController.navigate(Screen.AddEditIncident.createRoute(incidentId = incidentId))
+                    },
+                    onDeleteIncident = { incident ->
+                        securityViewModel.deleteIncident(incident)
+                    },
+                    onAddIncidentClick = {
+                        navController.navigate(Screen.AddEditIncident.createRoute())
+                    },
+                    onBackClick = { navController.popBackStack() }
+                )
+            }
+
+            // Incident Detail Screen
+            composable(
+                route = Screen.IncidentDetail.route,
+                arguments = listOf(
+                    navArgument("incidentId") { type = NavType.LongType }
+                )
+            ) { backStackEntry ->
+                val incidentId = backStackEntry.arguments?.getLong("incidentId") ?: 0L
+                val currentIncident = allIncidents.find { it.id == incidentId }
+
+                IncidentDetailScreen(
+                    incident = currentIncident,
+                    onUpdateStatus = { inc, newStatus ->
+                        securityViewModel.updateIncident(inc.copy(status = newStatus))
+                    },
+                    onEditIncident = { editIncId ->
+                        navController.navigate(Screen.AddEditIncident.createRoute(incidentId = editIncId))
+                    },
+                    onDeleteIncident = { inc ->
+                        securityViewModel.deleteIncident(inc)
+                        navController.popBackStack()
+                    },
+                    onBackClick = { navController.popBackStack() }
+                )
+            }
+
+            // Add / Edit Incident Screen
+            composable(
+                route = Screen.AddEditIncident.route,
+                arguments = listOf(
+                    navArgument("schoolName") {
+                        type = NavType.StringType
+                        nullable = true
+                        defaultValue = null
+                    },
+                    navArgument("incidentId") {
+                        type = NavType.LongType
+                        defaultValue = -1L
+                    }
+                )
+            ) { backStackEntry ->
+                val schoolNameParam = backStackEntry.arguments?.getString("schoolName")
+                val incidentIdParam = backStackEntry.arguments?.getLong("incidentId") ?: -1L
+                val existingIncident = if (incidentIdParam > 0) allIncidents.find { it.id == incidentIdParam } else null
+
+                AddEditIncidentScreen(
+                    initialSchoolName = schoolNameParam,
+                    existingIncident = existingIncident,
+                    schoolsList = allSchools,
+                    onSaveIncident = { incident ->
+                        if (incident.id > 0) {
+                            securityViewModel.updateIncident(incident)
+                        } else {
+                            securityViewModel.addIncident(incident)
+                        }
+                        navController.popBackStack()
+                    },
+                    onDeleteIncident = { incident ->
+                        securityViewModel.deleteIncident(incident)
+                        navController.popBackStack()
+                    },
+                    onBackClick = { navController.popBackStack() }
+                )
+            }
+
+            // Excel Import Screen
+            composable(Screen.ExcelImport.route) {
+                ExcelImportScreen(
+                    importMessage = importMessage,
+                    isImporting = isImporting,
+                    importSummary = importSummary,
+                    onImportSchools = { text ->
+                        securityViewModel.importSchoolsFromText(text)
+                    },
+                    onImportSchoolsRows = { rows ->
+                        securityViewModel.importSchoolsFromRows(rows)
+                    },
+                    onImportTeachers = { text ->
+                        securityViewModel.importTeachersFromText(text)
+                    },
+                    onImportTeachersRows = { rows ->
+                        securityViewModel.importTeachersFromRows(rows)
+                    },
+                    onDismissSummary = {
+                        securityViewModel.dismissImportSummary()
+                    },
+                    onNavigateToSchools = {
+                        navController.navigate(Screen.Schools.createRoute())
+                    },
+                    onNavigateToTeachers = {
+                        navController.navigate(Screen.Teachers.route)
+                    },
+                    onClearMessage = {
+                        securityViewModel.clearImportMessage()
+                    },
+                    onBackClick = { navController.popBackStack() }
+                )
+            }
+
+            // Reports Screen
+            composable(Screen.Reports.route) {
+                ReportsScreen(
+                    incidents = allIncidents,
+                    adminConfig = adminConfig,
+                    onBackClick = { navController.popBackStack() }
+                )
+            }
+
+            // Settings Screen
+            composable(Screen.Settings.route) {
+                SettingsScreen(
+                    adminConfig = adminConfig,
+                    isBackingUp = isBackingUp,
+                    lastBackupDate = lastBackupDate,
+                    isAutoBackupEnabled = isAutoBackupEnabled,
+                    backupResult = backupResult,
+                    restoreResult = restoreResult,
+                    onToggleAutoBackup = { securityViewModel.setAutoBackupEnabled(context, it) },
+                    onCreateBackupNow = { securityViewModel.createBackupNow(context) },
+                    onRestoreBackup = { uri -> securityViewModel.restoreBackup(context, uri) },
+                    onDismissBackupResult = { securityViewModel.dismissBackupResult() },
+                    onDismissRestoreResult = { securityViewModel.dismissRestoreResult() },
+                    onSaveAdminConfig = { d, a, dg, s ->
+                        securityViewModel.saveAdminConfig(d, a, dg, s)
+                    },
+                    onResetData = {
+                        securityViewModel.resetData()
+                    },
+                    onLogout = {
+                        authViewModel.logout()
+                        navController.navigate(Screen.Login.route) {
+                            popUpTo(0) { inclusive = true }
+                        }
+                    },
+                    onBackClick = { navController.popBackStack() }
+                )
+            }
+        }
+    }
+}
+package com.example.ui.screens
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.example.ui.theme.EduBlue
+import com.example.ui.theme.EduBlueDark
+import com.example.ui.theme.EduGold
+import com.example.ui.theme.EduGreen
+import com.example.ui.viewmodel.AuthState
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun LoginScreen(
+    authState: AuthState,
+    onLoginClick: (String, String) -> Unit,
+    onQuickAdminClick: () -> Unit
+) {
+    var emailOrUser by remember { mutableStateOf("mustafa.farghaly@samalut.edu.eg") }
+    var password by remember { mutableStateOf("admin@samalut2026") }
+    var passwordVisible by remember { mutableStateOf(false) }
+    val focusManager = LocalFocusManager.current
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(
+                Brush.verticalGradient(
+                    colors = listOf(EduBlueDark, EduBlue, MaterialTheme.colorScheme.background)
+                )
+            )
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(20.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Spacer(modifier = Modifier.height(30.dp))
+
+            // Official Header & Emblem
+            Box(
+                modifier = Modifier
+                    .size(80.dp)
+                    .background(Color.White.copy(alpha = 0.2f), CircleShape)
+                    .padding(8.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(EduGold, CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Security,
+                        contentDescription = "أيقونة أمن سمالوط",
+                        tint = EduBlueDark,
+                        modifier = Modifier.size(40.dp)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            Text(
+                text = "إدارة أمن الإدارة التعليمية بسمالوط",
+                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                color = Color.White,
+                textAlign = TextAlign.Center
+            )
+
+            Text(
+                text = "المسؤول: مستر مصطفى فرغلي",
+                style = MaterialTheme.typography.bodyMedium,
+                color = EduGold,
+                textAlign = TextAlign.Center
+            )
+
+            Spacer(modifier = Modifier.height(28.dp))
+
+            // Login Card
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("login_card"),
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
+            ) {
+                Column(
+                    modifier = Modifier.padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        text = "تسجيل دخول المسؤول (Admin)",
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.primary
+                    )
+
+                    Text(
+                        text = "الدخول لمنظومة متابعة المدارس والوقائع الأمنية",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(top = 4.dp, bottom = 20.dp)
+                    )
+
+                    // Error message if any
+                    if (authState.errorMessage != null) {
+                        Surface(
+                            color = MaterialTheme.colorScheme.errorContainer,
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(bottom = 16.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.ErrorOutline,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.error
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = authState.errorMessage,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onErrorContainer
+                                )
+                            }
+                        }
+                    }
+
+                    // User / Email
+                    OutlinedTextField(
+                        value = emailOrUser,
+                        onValueChange = { emailOrUser = it },
+                        label = { Text("اسم المستخدم أو البريد") },
+                        leadingIcon = {
+                            Icon(Icons.Default.Person, contentDescription = null, tint = EduBlue)
+                        },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(
+                            keyboardType = KeyboardType.Email,
+                            imeAction = ImeAction.Next
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("username_input"),
+                        shape = RoundedCornerShape(12.dp)
+                    )
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    // Password
+                    OutlinedTextField(
+                        value = password,
+                        onValueChange = { password = it },
+                        label = { Text("كلمة المرور") },
+                        leadingIcon = {
+                            Icon(Icons.Default.Lock, contentDescription = null, tint = EduBlue)
+                        },
+                        trailingIcon = {
+                            IconButton(onClick = { passwordVisible = !passwordVisible }) {
+                                Icon(
+                                    imageVector = if (passwordVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                    contentDescription = if (passwordVisible) "إخفاء" else "إظهار"
+                                )
+                            }
+                        },
+                        visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(
+                            keyboardType = KeyboardType.Password,
+                            imeAction = ImeAction.Done
+                        ),
+                        keyboardActions = KeyboardActions(
+                            onDone = {
+                                focusManager.clearFocus()
+                                onLoginClick(emailOrUser, password)
+                            }
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("password_input"),
+                        shape = RoundedCornerShape(12.dp)
+                    )
+
+                    Spacer(modifier = Modifier.height(24.dp))
+
+                    // Login Button
+                    Button(
+                        onClick = {
+                            focusManager.clearFocus()
+                            onLoginClick(emailOrUser, password)
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(50.dp)
+                            .testTag("login_button"),
+                        shape = RoundedCornerShape(14.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = EduBlue),
+                        enabled = !authState.isLoading
+                    ) {
+                        if (authState.isLoading) {
+                            CircularProgressIndicator(
+                                color = Color.White,
+                                modifier = Modifier.size(22.dp),
+                                strokeWidth = 2.dp
+                            )
+                        } else {
+                            Icon(Icons.Default.Login, contentDescription = null)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "تسجيل الدخول",
+                                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    // Quick Login as Mostafa Farghaly
+                    OutlinedButton(
+                        onClick = onQuickAdminClick,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
+                            .testTag("quick_admin_button"),
+                        shape = RoundedCornerShape(14.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = EduGreen)
+                    ) {
+                        Icon(Icons.Default.VerifiedUser, contentDescription = null, tint = EduGreen)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "دخول سريع: مستر مصطفى فرغلي",
+                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold)
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            // Security Hotline & Status
+            Surface(
+                color = Color.White.copy(alpha = 0.9f),
+                shape = RoundedCornerShape(14.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier.padding(14.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.LocalPolice,
+                        contentDescription = null,
+                        tint = EduBlueDark,
+                        modifier = Modifier.size(28.dp)
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Column {
+                        Text(
+                            text = "غرفة عمليات أمن إدارة سمالوط التعليمية",
+                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                            color = EduBlueDark
+                        )
+                        Text(
+                            text = "متابعة مستمرة لمدارس المركز وتأمين الامتحانات والمنشآت",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color(0xFF455A64)
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(20.dp))
+        }
+    }
+}
+package com.example.ui.screens
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.example.data.model.IncidentStatus
+import com.example.data.model.School
+import com.example.data.model.SchoolStage
+import com.example.data.model.SecurityIncident
+import com.example.data.model.Teacher
+import com.example.ui.components.SchoolCard
+import com.example.ui.theme.*
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun DashboardScreen(
+    schools: List<School>,
+    teachers: List<Teacher>,
+    incidents: List<SecurityIncident>,
+    adminName: String,
+    onAddSchool: (School) -> Unit,
+    onUpdateSchool: (School) -> Unit,
+    onDeleteSchool: (School) -> Unit,
+    onSchoolClick: (Long) -> Unit,
+    onNavigateToTeachers: () -> Unit,
+    onNavigateToIncidents: () -> Unit,
+    onNavigateToReports: () -> Unit,
+    onNavigateToExcelImport: () -> Unit,
+    onNavigateToAddIncident: () -> Unit,
+    onNavigateToSettings: () -> Unit,
+    leaves: List<com.example.data.model.TeacherLeaveEntity> = emptyList(),
+    penalties: List<com.example.data.model.TeacherPenaltyEntity> = emptyList(),
+    trips: List<com.example.data.model.SchoolTripEntity> = emptyList()
+) {
+    // Stage Filter State (Dropdown Menu)
+    var selectedStageFilter by remember { mutableStateOf<SchoolStage?>(null) }
+    var isStageMenuExpanded by remember { mutableStateOf(false) }
+    var searchQuery by remember { mutableStateOf("") }
+
+    // Dialog State for Add / Edit School
+    var showAddSchoolDialog by remember { mutableStateOf(false) }
+    var schoolToEdit by remember { mutableStateOf<School?>(null) }
+    var showAiAssistantDialog by remember { mutableStateOf(false) }
+
+    // Filtered Schools calculation
+    val filteredSchools = remember(schools, selectedStageFilter, searchQuery) {
+        schools.filter { school ->
+            val matchesStage = selectedStageFilter == null || school.stage == selectedStageFilter
+            val matchesQuery = searchQuery.isBlank() ||
+                    school.name.contains(searchQuery, ignoreCase = true) ||
+                    school.principalName.contains(searchQuery, ignoreCase = true) ||
+                    school.address.contains(searchQuery, ignoreCase = true) ||
+                    school.securityOfficerName.contains(searchQuery, ignoreCase = true)
+            matchesStage && matchesQuery
+        }
+    }
+
+    // Totals for top statistics
+    val totalCameras = remember(schools) { schools.sumOf { it.camerasCount } }
+    val totalExtinguishers = remember(schools) { schools.sumOf { it.extinguishersCount } }
+    val inProgressIncidentsCount = remember(incidents) { incidents.count { it.status == IncidentStatus.IN_PROGRESS } }
+
+    // Dialog display
+    if (showAddSchoolDialog || schoolToEdit != null) {
+        AddEditSchoolDialog(
+            schoolToEdit = schoolToEdit,
+            onDismiss = {
+                showAddSchoolDialog = false
+                schoolToEdit = null
+            },
+            onSaveSchool = { savedSchool ->
+                if (savedSchool.id > 0) {
+                    onUpdateSchool(savedSchool)
+                } else {
+                    onAddSchool(savedSchool)
+                }
+                showAddSchoolDialog = false
+                schoolToEdit = null
+            }
+        )
+    }
+
+    // AI Assistant Dialog
+    if (showAiAssistantDialog) {
+        com.example.ui.components.SmartQueryAssistantDialog(
+            schools = schools,
+            teachers = teachers,
+            incidents = incidents,
+            leaves = leaves,
+            penalties = penalties,
+            trips = trips,
+            onDismiss = { showAiAssistantDialog = false }
+        )
+    }
+
+    Scaffold(
+        floatingActionButton = {
+            Column(
+                horizontalAlignment = Alignment.End,
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                // AI Assistant Floating Action Button
+                ExtendedFloatingActionButton(
+                    onClick = { showAiAssistantDialog = true },
+                    containerColor = Color(0xFF6366F1),
+                    contentColor = Color.White,
+                    icon = { Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = Color(0xFFFFD700)) },
+                    text = { Text("المساعد الذكي (AI)", fontWeight = FontWeight.Bold) },
+                    modifier = Modifier.testTag("fab_ai_assistant")
+                )
+
+                // Add School Floating Action Button
+                ExtendedFloatingActionButton(
+                    onClick = {
+                        schoolToEdit = null
+                        showAddSchoolDialog = true
+                    },
+                    containerColor = EduGreen,
+                    contentColor = Color.White,
+                    icon = { Icon(Icons.Default.AddBusiness, contentDescription = null) },
+                    text = { Text("إضافة مدرسة جديدة", fontWeight = FontWeight.Bold) },
+                    modifier = Modifier.testTag("fab_add_school")
+                )
+            }
+        }
+    ) { paddingValues ->
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(paddingValues)
+                .background(MaterialTheme.colorScheme.background),
+            contentPadding = PaddingValues(bottom = 90.dp)
+        ) {
+            // Header Banner: اسم المحافظة والإدارة في الأعلى
+            item {
+                DashboardHeader(
+                    adminName = adminName,
+                    totalSchools = schools.size,
+                    totalCameras = totalCameras,
+                    totalExtinguishers = totalExtinguishers,
+                    inProgressIncidents = inProgressIncidentsCount
+                )
+            }
+
+            // Quick Access Tabs Bar (الوقائع، المعلمين، استيراد Excel، التقارير)
+            item {
+                QuickNavRow(
+                    teachersCount = teachers.size,
+                    incidentsCount = incidents.size,
+                    onNavigateToIncidents = onNavigateToIncidents,
+                    onNavigateToTeachers = onNavigateToTeachers,
+                    onNavigateToExcelImport = onNavigateToExcelImport,
+                    onNavigateToReports = onNavigateToReports
+                )
+            }
+
+            // Section Header & Single Dropdown Menu for School Stage Filtering
+            item {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 6.dp),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                ) {
+                    Column(modifier = Modifier.padding(14.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.FilterList, contentDescription = null, tint = EduBlue)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "تصفية المدارس حسب المرحلة التعليمية",
+                                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+
+                            if (selectedStageFilter != null || searchQuery.isNotBlank()) {
+                                TextButton(
+                                    onClick = {
+                                        selectedStageFilter = null
+                                        searchQuery = ""
+                                    },
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                                ) {
+                                    Text("إعادة ضبط", style = MaterialTheme.typography.labelSmall)
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        // ExposedDropdownMenuBox for School Stage Selection
+                        ExposedDropdownMenuBox(
+                            expanded = isStageMenuExpanded,
+                            onExpandedChange = { isStageMenuExpanded = !isStageMenuExpanded },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            OutlinedTextField(
+                                value = selectedStageFilter?.displayNameAr ?: "جميع المراحل التعليمية (الكل)",
+                                onValueChange = {},
+                                readOnly = true,
+                                label = { Text("المرحلة التعليمية") },
+                                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = isStageMenuExpanded) },
+                                leadingIcon = {
+                                    Icon(
+                                        imageVector = Icons.Default.Category,
+                                        contentDescription = null,
+                                        tint = EduBlue
+                                    )
+                                },
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier
+                                    .menuAnchor()
+                                    .fillMaxWidth()
+                                    .testTag("dropdown_filter_stage")
+                            )
+
+                            ExposedDropdownMenu(
+                                expanded = isStageMenuExpanded,
+                                onDismissRequest = { isStageMenuExpanded = false }
+                            ) {
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            text = "جميع المراحل التعليمية (الكل - ${schools.size} مدرسة)",
+                                            fontWeight = if (selectedStageFilter == null) FontWeight.Bold else FontWeight.Normal,
+                                            color = if (selectedStageFilter == null) EduBlue else MaterialTheme.colorScheme.onSurface
+                                        )
+                                    },
+                                    onClick = {
+                                        selectedStageFilter = null
+                                        isStageMenuExpanded = false
+                                    }
+                                )
+
+                                HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+
+                                SchoolStage.values().forEach { stage ->
+                                    val countInStage = schools.count { it.stage == stage }
+                                    DropdownMenuItem(
+                                        text = {
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Text(
+                                                    text = stage.displayNameAr,
+                                                    fontWeight = if (selectedStageFilter == stage) FontWeight.Bold else FontWeight.Normal,
+                                                    color = if (selectedStageFilter == stage) EduBlue else MaterialTheme.colorScheme.onSurface
+                                                )
+                                                Surface(
+                                                    color = EduBlue.copy(alpha = 0.1f),
+                                                    shape = RoundedCornerShape(6.dp)
+                                                ) {
+                                                    Text(
+                                                        text = "$countInStage مدرسة",
+                                                        style = MaterialTheme.typography.labelSmall,
+                                                        color = EduBlue,
+                                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                                    )
+                                                }
+                                            }
+                                        },
+                                        onClick = {
+                                            selectedStageFilter = stage
+                                            isStageMenuExpanded = false
+                                        }
+                                    )
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        // Fast Search Field
+                        OutlinedTextField(
+                            value = searchQuery,
+                            onValueChange = { searchQuery = it },
+                            placeholder = { Text("بحث باسم المدرسة أو المدير أو مسؤول الأمن...") },
+                            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = EduBlue) },
+                            trailingIcon = {
+                                if (searchQuery.isNotBlank()) {
+                                    IconButton(onClick = { searchQuery = "" }) {
+                                        Icon(Icons.Default.Close, contentDescription = "مسح")
+                                    }
+                                }
+                            },
+                            singleLine = true,
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("search_schools_field")
+                        )
+                    }
+                }
+            }
+
+            // Schools List Header Counter
+            item {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "المدارس المسجلة (${filteredSchools.size})",
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.primary
+                    )
+
+                    if (selectedStageFilter != null) {
+                        Surface(
+                            color = EduBlue.copy(alpha = 0.12f),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text(
+                                text = "مرحلة: ${selectedStageFilter?.displayNameAr}",
+                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                color = EduBlue,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Schools Cards List
+            if (filteredSchools.isEmpty()) {
+                item {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(32.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Icon(
+                                imageVector = Icons.Default.School,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                                modifier = Modifier.size(64.dp)
+                            )
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Text(
+                                text = "لا توجد مدارس مطابقة للبحث أو الفلتر المحدد",
+                                style = MaterialTheme.typography.titleSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            FilledTonalButton(
+                                onClick = {
+                                    selectedStageFilter = null
+                                    searchQuery = ""
+                                }
+                            ) {
+                                Text("عرض جميع المدارس")
+                            }
+                        }
+                    }
+                }
+            } else {
+                items(filteredSchools, key = { it.id }) { school ->
+                    Box(modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) {
+                        SchoolCard(
+                            school = school,
+                            onSchoolClick = { onSchoolClick(school.id) },
+                            onEditSchool = { schoolToEdit = school },
+                            onDeleteSchool = { onDeleteSchool(school) }
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * شريط العنوان والبيانات الرسمية بالأعلى (المحافظة والإدارة والمسؤول)
+ */
+@Composable
+fun DashboardHeader(
+    adminName: String,
+    totalSchools: Int,
+    totalCameras: Int,
+    totalExtinguishers: Int,
+    inProgressIncidents: Int
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(16.dp),
+        shape = RoundedCornerShape(22.dp),
+        colors = CardDefaults.cardColors(containerColor = EduBlueDark),
+        elevation = CardDefaults.cardElevation(defaultElevation = 6.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(EduBlueDark, EduBlue)
+                    )
+                )
+                .padding(20.dp)
+        ) {
+            // Governorate & Administration Prominent Header
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(52.dp)
+                        .background(EduGold, CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Shield,
+                        contentDescription = null,
+                        tint = EduBlueDark,
+                        modifier = Modifier.size(30.dp)
+                    )
+                }
+                Spacer(modifier = Modifier.width(14.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Surface(
+                        color = Color.White.copy(alpha = 0.15f),
+                        shape = RoundedCornerShape(6.dp)
+                    ) {
+                        Text(
+                            text = "محافظة المنيا • مديرية التربية والتعليم",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Color.White,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "إدارة سمالوط التعليمية - قسم الأمن",
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                        color = Color.White
+                    )
+                    Text(
+                        text = "المسؤول: $adminName",
+                        style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
+                        color = EduGold
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(18.dp))
+
+            // Quick Stats Row
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceAround
+            ) {
+                StatBadge(
+                    count = totalSchools.toString(),
+                    label = "المدارس",
+                    icon = Icons.Default.School
+                )
+                StatBadge(
+                    count = totalCameras.toString(),
+                    label = "الكاميرات",
+                    icon = Icons.Default.Videocam,
+                    accentColor = EduGold
+                )
+                StatBadge(
+                    count = totalExtinguishers.toString(),
+                    label = "الطفايات",
+                    icon = Icons.Default.FireExtinguisher
+                )
+                StatBadge(
+                    count = inProgressIncidents.toString(),
+                    label = "قيد المتابعة",
+                    icon = Icons.Default.PendingActions,
+                    accentColor = if (inProgressIncidents > 0) Color(0xFFFFB74D) else Color.White
+                )
+            }
+        }
+    }
+}
+
+/**
+ * شارات الإحصائيات في الهيدر
+ */
+@Composable
+fun StatBadge(
+    count: String,
+    label: String,
+    icon: ImageVector,
+    accentColor: Color = Color.White
+) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = accentColor,
+                modifier = Modifier.size(16.dp)
+            )
+            Spacer(modifier = Modifier.width(4.dp))
+            Text(
+                text = count,
+                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                color = accentColor
+            )
+        }
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodySmall,
+            color = Color.White.copy(alpha = 0.85f)
+        )
+    }
+}
+
+/**
+ * أزرار الوصول السريع للأقسام الهامة (الوقائع، المعلمين، استيراد Excel، التقارير)
+ */
+@Composable
+fun QuickNavRow(
+    teachersCount: Int,
+    incidentsCount: Int,
+    onNavigateToIncidents: () -> Unit,
+    onNavigateToTeachers: () -> Unit,
+    onNavigateToExcelImport: () -> Unit,
+    onNavigateToReports: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        QuickNavChip(
+            title = "الأحداث والوقائع",
+            subtitle = "$incidentsCount واقعة",
+            icon = Icons.Default.WarningAmber,
+            accentColor = Color(0xFFD32F2F),
+            modifier = Modifier.weight(1f),
+            onClick = onNavigateToIncidents
+        )
+
+        QuickNavChip(
+            title = "المعلمين والموظفين",
+            subtitle = "$teachersCount كادر",
+            icon = Icons.Default.Groups,
+            accentColor = EduGreen,
+            modifier = Modifier.weight(1f),
+            onClick = onNavigateToTeachers
+        )
+
+        QuickNavChip(
+            title = "استيراد Excel",
+            subtitle = "XLSX / CSV",
+            icon = Icons.Default.TableChart,
+            accentColor = EduBlue,
+            modifier = Modifier.weight(1f),
+            onClick = onNavigateToExcelImport
+        )
+
+        QuickNavChip(
+            title = "التقارير",
+            subtitle = "PDF / طباعة",
+            icon = Icons.Default.Assessment,
+            accentColor = EduGoldDark,
+            modifier = Modifier.weight(1f),
+            onClick = onNavigateToReports
+        )
+    }
+}
+
+@Composable
+fun QuickNavChip(
+    title: String,
+    subtitle: String,
+    icon: ImageVector,
+    accentColor: Color,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
+) {
+    Surface(
+        modifier = modifier.clickable { onClick() },
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surface,
+        shadowElevation = 2.dp
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 10.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(32.dp)
+                    .background(accentColor.copy(alpha = 0.12f), CircleShape),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = accentColor,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = title,
+                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1
+            )
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.bodySmall.copy(fontSize = 10.sp),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1
+            )
+        }
+    }
+}
+
+@Composable
+fun RecentIncidentItem(
+    incident: SecurityIncident,
+    onClick: () -> Unit
+) {
+    val statusColor = when (incident.status) {
+        IncidentStatus.RESOLVED -> StatusResolved
+        IncidentStatus.IN_PROGRESS -> StatusInProgress
+        IncidentStatus.CLOSED -> StatusClosed
+    }
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onClick() },
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .width(4.dp)
+                    .height(40.dp)
+                    .background(statusColor, RoundedCornerShape(2.dp))
+            )
+            Spacer(modifier = Modifier.width(10.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = incident.title,
+                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1
+                )
+                Text(
+                    text = "${incident.schoolName} • ${incident.dateString}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Surface(
+                color = statusColor.copy(alpha = 0.12f),
+                shape = RoundedCornerShape(6.dp)
+            ) {
+                Text(
+                    text = incident.status.displayNameAr,
+                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                    color = statusColor,
+                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                )
+            }
+        }
+    }
+}

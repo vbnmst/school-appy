@@ -1,0 +1,27 @@
+workflows:
+  android-workflow:
+    name: Android Build
+    max_build_duration: 60
+    instance_type: mac_mini_m1
+    environment:
+      vars:
+        PACKAGE_NAME: "com.example.samalutsecurity"
+      node: latest
+      java: 17
+    scripts:
+      - name: Generate Keystore and Build APK
+        script: |
+          # توليد ملف debug.keystore الافتراضي للأندرويد لتخطي الفحص
+          keytool -genkey -v -keystore debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+          gradle wrapper --gradle-version 9.3.1 --distribution-type bin
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon -x lint -x test
+    artifacts:
+      - app/build/outputs/apk/**/*.apk
+    publishing:
+      email:
+        recipients:
+          - waleedelgarhy93@gmail.com
+        notify:
+          success: true
+          failure: true
